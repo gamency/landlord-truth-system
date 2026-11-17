@@ -21,4 +21,8 @@ def create_app():
     def health():
         return {'status': 'ok', 'service': 'landlord-truth'}
 
+        # 注册蓝图
+    from app.modules.property.routes import property_bp
+    app.register_blueprint(property_bp, url_prefix='/api/v1/property')
+
     return app
