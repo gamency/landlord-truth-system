@@ -309,3 +309,156 @@ def confirm_bill_draft(draft_id):
     db.session.commit()
 
     return jsonify({"code": "OK", "message": "账单已确认，等待发送"})
+
+from app.modules.property.models import Payment, WriteOffRecord
+from app.modules.property.schemas import RecordPaymentRequest, WriteOffRequest
+
+# 1. 查询所有已确认未结清的账单
+@property_bp.route('/bills/confirmed', methods=['GET'])
+def list_confirmed_bills():
+    bills = db.session.query(ConfirmedBill).filter(ConfirmedBill.remaining_amount > 0).all()
+    result = []
+    for b in bills:
+        room = db.session.get(Room, b.room_id)
+        result.append({
+            "bill_id": str(b.bill_id),
+            "room_number": room.room_number if room else "未知",
+            "amount": float(b.amount),
+            "paid_amount": float(b.paid_amount or 0),
+            "remaining_amount": float(b.remaining_amount),
+            "status": b.status
+        })
+    return jsonify({"code": "OK", "data": result})
+
+# 2. 录入收款
+@property_bp.route('/payments', methods=['POST'])
+def record_payment():
+    try:
+        data = RecordPaymentRequest(**request.get_json())
+    except ValidationError as e:
+        return jsonify({"code": "VALIDATION_ERROR", "details": e.errors()}), 400
+
+    payment = Payment(
+        amount=data.amount,
+        payer_name=data.payer_name,
+        channel=data.channel,
+        remaining_amount=data.amount
+    )
+    db.session.add(payment)
+    db.session.commit()
+
+    return jsonify({"code": "OK", "data": {"payment_id": str(payment.payment_id)}}), 201
+
+# 3. 查询收款流水
+@property_bp.route('/payments', methods=['GET'])
+def list_payments():
+    payments = db.session.query(Payment).order_by(Payment.created_at.desc()).all()
+    return jsonify({
+        "code": "OK",
+        "data": [{
+            "payment_id": str(p.payment_id),
+            "amount": float(p.amount),
+            "payer_name": p.payer_name,
+            "channel": p.channel,
+            "status": p.status,
+            "remaining_amount": float(p.remaining_amount),
+            "received_at": p.received_at.strftime('%Y-%m-%d %H:%M')
+        } for p in payments]
+    })
+
+# 4. 核销（把收款扣到账单上）
+@property_bp.route('/payments/<payment_id>/write-off', methods=['POST'])
+def write_off_payment(payment_id):
+    payment = db.session.get(Payment, payment_id)
+    if not payment or payment.remaining_amount <= 0:
+        return jsonify({"code": "ERROR", "message": "收款不存在或已全额核销"}), 400
+
+    try:
+        data = WriteOffRequest(**request.get_json())
+    except ValidationError as e:
+        return jsonify({"code": "VALIDATION_ERROR", "details": e.errors()}), 400
+
+    bill = db.session.get(ConfirmedBill, data.bill_id)
+    if not bill or bill.remaining_amount <= 0:
+        return jsonify({"code": "ERROR", "message": "账单不存在或已结清"}), 400
+    if data.amount > float(payment.remaining_amount):
+        return jsonify({"code": "ERROR", "message": "核销金额超过收款余额"}), 400
+    if data.amount > float(bill.remaining_amount):
+        return jsonify({"code": "ERROR", "message": "核销金额超过账单欠款"}), 400
+
+    # 扣减收款余额
+    payment.remaining_amount = float(payment.remaining_amount) - data.amount
+    if payment.remaining_amount == 0:
+        payment.status = 'WRITTEN_OFF'
+
+    # 扣减账单欠款
+    bill.paid_amount = float(bill.paid_amount or 0) + data.amount
+    bill.remaining_amount = float(bill.remaining_amount) - data.amount
+    if bill.remaining_amount == 0:
+        bill.status = 'PAID'
+
+    # 记录核销流水
+    record = WriteOffRecord(
+        payment_id=payment.payment_id,
+        bill_id=bill.bill_id,
+        amount=data.amount
+    )
+    db.session.add(record)
+
+    # 发布事件
+    event = OutboxEvent(
+        event_type='PaymentWrittenOff',
+        payload={"payment_id": str(payment.payment_id), "bill_id": str(bill.bill_id), "amount": data.amount}
+    )
+    db.session.add(event)
+    db.session.commit()
+
+    return jsonify({"code": "OK", "message": "核销成功"})
+
+@property_bp.route('/bills/<bill_id>/pay', methods=['POST'])
+def direct_pay_bill(bill_id):
+    bill = db.session.get(ConfirmedBill, bill_id)
+    if not bill or bill.remaining_amount <= 0:
+        return jsonify({"code": "ERROR", "message": "账单不存在或已结清"}), 400
+
+    data = request.get_json()
+    amount = float(data.get('amount', 0))
+    channel = data.get('channel', 'WECHAT')
+    payer_name = data.get('payer_name', '未知')
+
+    if amount <= 0 or amount > float(bill.remaining_amount):
+        return jsonify({"code": "ERROR", "message": "收款金额不合法"}), 400
+
+    # 1. 创建一条已直接核销的收款记录
+    payment = Payment(
+        amount=amount,
+        payer_name=payer_name,
+        channel=channel,
+        remaining_amount=0, 
+        status='WRITTEN_OFF'
+    )
+    db.session.add(payment)
+    db.session.flush()
+
+    # 2. 扣减账单欠款
+    bill.paid_amount = float(bill.paid_amount or 0) + amount
+    bill.remaining_amount = float(bill.remaining_amount) - amount
+    if bill.remaining_amount == 0:
+        bill.status = 'PAID'
+
+    # 3. 生成核销记录
+    record = WriteOffRecord(
+        payment_id=payment.payment_id,
+        bill_id=bill.bill_id,
+        amount=amount
+    )
+    db.session.add(record)
+
+    # 4. 发布事件
+    db.session.add(OutboxEvent(
+        event_type='BillPaid',
+        payload={"bill_id": str(bill.bill_id), "amount": amount}
+    ))
+    
+    db.session.commit()
+    return jsonify({"code": "OK", "message": "收款成功"})

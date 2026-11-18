@@ -42,3 +42,12 @@ class SignTenancyRequest(BaseModel):
     deposit_amount: float
     start_date: str  # YYYY-MM-DD
     end_date: str
+
+class RecordPaymentRequest(BaseModel):
+    amount: float
+    payer_name: str
+    channel: str = "WECHAT"
+
+class WriteOffRequest(BaseModel):
+    bill_id: str
+    amount: float

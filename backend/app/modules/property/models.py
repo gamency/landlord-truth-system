@@ -109,3 +109,22 @@ class ConfirmedBill(db.Model):
     
     status = db.Column(db.String(20), default='CONFIRMED') # CONFIRMED, SENT, PAID
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Payment(db.Model):
+    __tablename__ = 'payment'
+    payment_id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amount = db.Column(db.Numeric(14, 2), nullable=False)
+    payer_name = db.Column(db.String(50), nullable=False)
+    channel = db.Column(db.String(20), nullable=False) # CASH, WECHAT, ALIPAY, BANK
+    received_at = db.Column(db.DateTime, default=datetime.utcnow)
+    status = db.Column(db.String(20), default='PENDING') # PENDING, WRITTEN_OFF
+    remaining_amount = db.Column(db.Numeric(14, 2), nullable=False) # 未核销余额
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class WriteOffRecord(db.Model):
+    __tablename__ = 'write_off_record'
+    write_off_id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    payment_id = db.Column(UUID(as_uuid=True), db.ForeignKey('payment.payment_id'), nullable=False)
+    bill_id = db.Column(UUID(as_uuid=True), db.ForeignKey('confirmed_bill.bill_id'), nullable=False)
+    amount = db.Column(db.Numeric(14, 2), nullable=False)
+    written_off_at = db.Column(db.DateTime, default=datetime.utcnow)
