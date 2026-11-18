@@ -12,6 +12,7 @@ import AgentChat from './components/AgentChat.vue'
         <RouterLink to="/property" class="nav-item">🏢 房源管理</RouterLink>
         <RouterLink to="/billing" class="nav-item">📄 账单管理</RouterLink>
         <a class="nav-item disabled">📊 对账管理 (待开发)</a>
+        <RouterLink to="/meter-reading" class="nav-item">📷 AI 抄表</RouterLink>
       </nav>
     </aside>
 

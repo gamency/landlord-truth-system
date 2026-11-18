@@ -462,3 +462,90 @@ def direct_pay_bill(bill_id):
     
     db.session.commit()
     return jsonify({"code": "OK", "message": "收款成功"})
+
+from app.modules.property.models import MeterReading
+import random
+
+# 1. 模拟 AI 识别接口（接收房间，返回随机数字）
+@property_bp.route('/rooms/<room_id>/ocr-mock', methods=['POST'])
+def mock_ocr_reading(room_id):
+    room = db.session.get(Room, room_id)
+    if not room:
+        return jsonify({"code": "NOT_FOUND", "message": "房间不存在"}), 404
+        
+    meter = db.session.query(Meter).filter_by(room_id=room_id, meter_type='ELECTRIC').first()
+    if not meter:
+        return jsonify({"code": "ERROR", "message": "该房间未绑定电表，无法抄表"}), 400
+
+    # 模拟 AI 识别结果：80%概率正常，20%概率触发倒挂异常
+    is_anomaly = random.random() < 0.2
+    if is_anomaly:
+        mock_value = float(meter.current_reading or 0) - 10 # 故意比上次小
+        confidence = random.uniform(0.7, 0.85)
+        status = 'ANOMALY'
+    else:
+        mock_value = float(meter.current_reading or 0) + random.uniform(10, 50)
+        confidence = random.uniform(0.9, 0.99)
+        status = 'SUCCESS'
+
+    reading = MeterReading(
+        room_id=room_id,
+        meter_id=meter.meter_id,
+        read_value=round(mock_value, 2),
+        confidence=round(confidence, 2),
+        image_url="/mock/path/img.jpg",
+        status=status
+    )
+    db.session.add(reading)
+    db.session.commit()
+
+    return jsonify({
+        "code": "OK",
+        "data": {
+            "reading_id": str(reading.reading_id),
+            "room_number": room.room_number,
+            "value": reading.read_value,
+            "confidence": reading.confidence,
+            "status": reading.status,
+            "last_reading": float(meter.current_reading or 0)
+        }
+    })
+
+# 2. 查询识别记录
+@property_bp.route('/readings', methods=['GET'])
+def list_readings():
+    readings = db.session.query(MeterReading).order_by(MeterReading.created_at.desc()).limit(20).all()
+    result = []
+    for r in readings:
+        room = db.session.get(Room, r.room_id)
+        result.append({
+            "reading_id": str(r.reading_id),
+            "room_number": room.room_number if room else "未知",
+            "value": float(r.read_value) if r.read_value else 0,
+            "confidence": r.confidence,
+            "status": r.status,
+            "created_at": r.created_at.strftime('%H:%M:%S')
+        })
+    return jsonify({"code": "OK", "data": result})
+
+# 3. 人工修正接口
+@property_bp.route('/readings/<reading_id>/correct', methods=['POST'])
+def correct_reading(reading_id):
+    reading = db.session.get(MeterReading, reading_id)
+    if not reading:
+        return jsonify({"code": "NOT_FOUND", "message": "记录不存在"}), 404
+        
+    data = request.get_json()
+    new_value = float(data.get('value'))
+    
+    # 修正原记录
+    reading.read_value = new_value
+    reading.status = 'MANUALLY_CORRECTED'
+    
+    # 更新电表当前读数
+    meter = db.session.get(Meter, reading.meter_id)
+    if meter:
+        meter.current_reading = new_value
+        
+    db.session.commit()
+    return jsonify({"code": "OK", "message": "修正成功"})

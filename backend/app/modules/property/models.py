@@ -128,3 +128,16 @@ class WriteOffRecord(db.Model):
     bill_id = db.Column(UUID(as_uuid=True), db.ForeignKey('confirmed_bill.bill_id'), nullable=False)
     amount = db.Column(db.Numeric(14, 2), nullable=False)
     written_off_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class MeterReading(db.Model):
+    __tablename__ = 'meter_reading'
+    reading_id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    room_id = db.Column(UUID(as_uuid=True), db.ForeignKey('room.room_id'), nullable=False)
+    meter_id = db.Column(UUID(as_uuid=True), db.ForeignKey('meter.meter_id'), nullable=False)
+    
+    read_value = db.Column(db.Numeric(14, 2), nullable=True) # AI识别出的值
+    confidence = db.Column(db.Float, nullable=True) # 置信度
+    image_url = db.Column(db.String(255), nullable=True) # 模拟存个本地路径
+    status = db.Column(db.String(20), default='PENDING') # PENDING, SUCCESS, ANOMALY, MANUALLY_CORRECTED
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
