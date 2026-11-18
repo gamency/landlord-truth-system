@@ -61,6 +61,45 @@ const handleCreateRoom = async () => {
 }
 
 onMounted(fetchProperties)
+
+// ... 保留之前的代码 ...
+const showRoomModal = ref(false)
+const currentRoom = ref<any>(null)
+const roomMeters = ref<any[]>([])
+
+// 打开房间详情
+const openRoomDetail = async (room: any) => {
+  currentRoom.value = room
+  showRoomModal.value = true
+  await fetchRoomMeters()
+}
+
+// 获取房间的表计
+const fetchRoomMeters = async () => {
+  if (!currentRoom.value) return
+  const res = await axios.get(`/api/v1/property/rooms/${currentRoom.value.room_id}`)
+  roomMeters.value = res.data.data.meters
+}
+
+// 绑定表计
+const handleBindMeter = async (type: string, label: string) => {
+  const meterNumber = prompt(`请输入${label}表号（如 E001）：`)
+  if (!meterNumber) return
+  const reading = prompt(`请输入${label}初始读数（如 0）：`, '0')
+  if (reading === null) return
+
+  try {
+    await axios.post(`/api/v1/property/rooms/${currentRoom.value.room_id}/meters`, {
+      meter_type: type,
+      meter_number: meterNumber,
+      initial_reading: parseFloat(reading)
+    })
+    alert('绑定成功')
+    await fetchRoomMeters()
+  } catch (e: any) {
+    alert(e.response?.data?.message || '绑定失败')
+  }
+}
 </script>
 
 <template>
@@ -102,12 +141,60 @@ onMounted(fetchProperties)
             v-for="room in rooms" 
             :key="room.room_id"
             :class="['room-card', room.room_status === 'VACANT' ? 'vacant' : 'occupied']"
+            @click="openRoomDetail(room)"
+            style="cursor: pointer;"
           >
             <h4>{{ room.room_name || room.room_number }}</h4>
             <p>{{ room.room_type === 'RENTAL' ? '出租房' : room.room_type }}</p>
             <span class="status">
               {{ room.room_status === 'VACANT' ? '空置' : '已租' }}
             </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新增：房间详情弹窗 (Modal) -->
+    <div v-if="showRoomModal" class="modal-overlay" @click.self="showRoomModal = false">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>{{ currentRoom?.room_name || currentRoom?.room_number }} - 详情配置</h3>
+          <button class="close-btn" @click="showRoomModal = false">×</button>
+        </div>
+        
+        <div class="modal-body">
+          <h4>📊 表计绑定情况</h4>
+          <p style="font-size: 14px; color: #86909c; margin-bottom: 16px;">
+            抄表前必须先绑定表计。
+          </p>
+
+          <div class="meter-list">
+            <!-- 电表 -->
+            <div class="meter-item">
+              <span>💡 电表</span>
+              <template v-if="roomMeters.find(m => m.meter_type === 'ELECTRIC')">
+                <span class="bound-text">已绑定: {{ roomMeters.find(m => m.meter_type === 'ELECTRIC').meter_number }}</span>
+              </template>
+              <button v-else class="btn-small" @click="handleBindMeter('ELECTRIC', '电')">+ 绑定电表</button>
+            </div>
+            
+            <!-- 冷水表 -->
+            <div class="meter-item">
+              <span>💧 冷水表</span>
+              <template v-if="roomMeters.find(m => m.meter_type === 'COLD_WATER')">
+                <span class="bound-text">已绑定: {{ roomMeters.find(m => m.meter_type === 'COLD_WATER').meter_number }}</span>
+              </template>
+              <button v-else class="btn-small" @click="handleBindMeter('COLD_WATER', '冷水')">+ 绑定冷水表</button>
+            </div>
+
+            <!-- 热水表 -->
+            <div class="meter-item">
+              <span>🔥 热水表</span>
+              <template v-if="roomMeters.find(m => m.meter_type === 'HOT_WATER')">
+                <span class="bound-text">已绑定: {{ roomMeters.find(m => m.meter_type === 'HOT_WATER').meter_number }}</span>
+              </template>
+              <button v-else class="btn-small" @click="handleBindMeter('HOT_WATER', '热水')">+ 绑定热水表</button>
+            </div>
           </div>
         </div>
       </div>
@@ -132,4 +219,30 @@ onMounted(fetchProperties)
 .status { display: inline-block; margin-top: 12px; padding: 4px 8px; font-size: 12px; border-radius: 4px; }
 .vacant .status { background: #f2f3f5; color: #86909c; }
 .occupied .status { background: #e8ffea; color: #00b42a; }
+
+/* ... 保留之前的样式 ... */
+
+/* 弹窗样式 */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000;
+}
+.modal-content {
+  background: white; width: 400px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  overflow: hidden;
+}
+.modal-header {
+  padding: 16px 20px; border-bottom: 1px solid #e5e6eb; display: flex; justify-content: space-between; align-items: center;
+}
+.modal-header h3 { font-size: 18px; margin: 0; }
+.close-btn { background: none; border: none; font-size: 24px; color: #86909c; cursor: pointer; }
+.modal-body { padding: 20px; }
+.meter-list { display: flex; flex-direction: column; gap: 12px; }
+.meter-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px; border: 1px solid #e5e6eb; border-radius: 6px;
+}
+.btn-small { background: #e8f3ff; color: #1677ff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.btn-small:hover { background: #1677ff; color: white; }
+.bound-text { color: #00b42a; font-size: 14px; font-weight: bold; }
 </style>

@@ -97,3 +97,61 @@ def list_rooms(property_id):
             for r in rooms
         ]
     })
+
+from app.modules.property.models import Meter
+from app.modules.property.schemas import CreateMeterRequest
+
+@property_bp.route('/rooms/<room_id>', methods=['GET'])
+def get_room_detail(room_id):
+    room = db.session.get(Room, room_id)
+    if not room:
+        return jsonify({"code": "NOT_FOUND_ROOM", "message": "房间不存在"}), 404
+    
+    # 查出该房间的所有表计
+    meters = db.session.query(Meter).filter_by(room_id=room_id).all()
+    
+    return jsonify({
+        "code": "OK",
+        "data": {
+            "room_id": str(room.room_id),
+            "room_number": room.room_number,
+            "room_status": room.room_status,
+            "meters": [
+                {
+                    "meter_id": str(m.meter_id),
+                    "meter_type": m.meter_type,
+                    "meter_number": m.meter_number,
+                    "current_reading": float(m.current_reading or 0)
+                } for m in meters
+            ]
+        }
+    })
+
+@property_bp.route('/rooms/<room_id>/meters', methods=['POST'])
+def bind_meter(room_id):
+    room = db.session.get(Room, room_id)
+    if not room:
+        return jsonify({"code": "NOT_FOUND_ROOM", "message": "房间不存在"}), 404
+
+    try:
+        data = CreateMeterRequest(**request.get_json())
+    except ValidationError as e:
+        return jsonify({"code": "VALIDATION_ERROR", "details": e.errors()}), 400
+
+    # 检查该类型表计是否已绑定
+    existing = db.session.query(Meter).filter_by(room_id=room_id, meter_type=data.meter_type).first()
+    if existing:
+        return jsonify({"code": "CONFLICT", "message": "该房间已绑定此类型表计"}), 409
+
+    new_meter = Meter(
+        room_id=room_id,
+        property_id=room.property_id,
+        meter_type=data.meter_type,
+        meter_number=data.meter_number,
+        initial_reading=data.initial_reading,
+        current_reading=data.initial_reading
+    )
+    db.session.add(new_meter)
+    db.session.commit()
+
+    return jsonify({"code": "OK", "data": {"meter_id": str(new_meter.meter_id)}}), 201

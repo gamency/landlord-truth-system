@@ -12,3 +12,10 @@ class CreateRoomRequest(BaseModel):
     room_type: str = "RENTAL"
     room_name: Optional[str] = None
     layout: Optional[dict[str, Any]] = None
+
+from typing import Optional
+
+class CreateMeterRequest(BaseModel):
+    meter_type: str # ELECTRIC, COLD_WATER, HOT_WATER
+    meter_number: str
+    initial_reading: float = 0.0
