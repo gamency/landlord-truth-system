@@ -59,3 +59,39 @@ class Meter(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     version = db.Column(db.Integer, default=1)
+
+# ================= 租约与账单相关表 =================
+class Tenancy(db.Model):
+    __tablename__ = 'tenancy'
+    tenancy_id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    room_id = db.Column(UUID(as_uuid=True), db.ForeignKey('room.room_id'), nullable=False)
+    tenant_name = db.Column(db.String(50), nullable=False)
+    tenant_phone = db.Column(db.String(20), nullable=False)
+    monthly_rent = db.Column(db.Numeric(14, 2), nullable=False)
+    deposit_amount = db.Column(db.Numeric(14, 2), nullable=False)
+    
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    status = db.Column(db.String(20), default='ACTIVE')
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class BillDraft(db.Model):
+    __tablename__ = 'bill_draft'
+    bill_draft_id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenancy_id = db.Column(UUID(as_uuid=True), db.ForeignKey('tenancy.tenancy_id'), nullable=False)
+    room_id = db.Column(UUID(as_uuid=True), db.ForeignKey('room.room_id'), nullable=False)
+    
+    theoretical_amount = db.Column(db.Numeric(14, 2), nullable=False)
+    actual_amount = db.Column(db.Numeric(14, 2), nullable=False)
+    status = db.Column(db.String(20), default='DRAFT')
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class OutboxEvent(db.Model):
+    __tablename__ = 'outbox_event'
+    event_id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_type = db.Column(db.String(100), nullable=False)
+    payload = db.Column(JSONB, nullable=False)
+    status = db.Column(db.String(20), default='PENDING')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

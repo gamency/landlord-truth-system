@@ -32,3 +32,13 @@ class BatchCreatePropertyRequest(BaseModel):
     property_name: str
     address: str
     floors: list[BatchCreateFloor]
+
+from datetime import date
+
+class SignTenancyRequest(BaseModel):
+    tenant_name: str
+    tenant_phone: str
+    monthly_rent: float
+    deposit_amount: float
+    start_date: str  # YYYY-MM-DD
+    end_date: str

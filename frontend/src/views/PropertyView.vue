@@ -146,6 +146,33 @@ const submitBatch = async () => {
   }
 }
 
+const showSignModal = ref(false)
+const signRoom = ref<any>(null)
+const signForm = ref({
+  tenant_name: '', tenant_phone: '', monthly_rent: 1200, deposit_amount: 2400,
+  start_date: new Date().toISOString().split('T')[0],
+  end_date: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0]
+})
+
+const openSignModal = (room: any) => {
+  signRoom.value = room
+  showSignModal.value = true
+}
+
+const submitSign = async () => {
+  if (!signForm.value.tenant_name || !signForm.value.tenant_phone) {
+    return alert('请填写租客姓名和电话')
+  }
+  try {
+    await axios.post(`/api/v1/property/rooms/${signRoom.value.room_id}/sign`, signForm.value)
+    alert('签约成功！账单草稿已生成。')
+    showSignModal.value = false
+    selectProperty(activeProperty.value) // 刷新房态
+  } catch (e: any) {
+    alert('签约失败：' + (e.response?.data?.message || e.message))
+  }
+}
+
 </script>
 
 <template>
@@ -185,6 +212,7 @@ const submitBatch = async () => {
           该楼栋下还没有房间，点击右上角“添加房间”试试。
         </div>
 
+        
         <div v-else class="room-grid">
           <div 
             v-for="room in rooms" 
@@ -198,6 +226,15 @@ const submitBatch = async () => {
             <span class="status">
               {{ room.room_status === 'VACANT' ? '空置' : '已租' }}
             </span>
+            <!-- 新增：如果空置，显示签约按钮 -->
+            <button 
+              v-if="room.room_status === 'VACANT'" 
+              class="btn-small" 
+              style="margin-top: 8px; width: 100%;"
+              @click.stop="openSignModal(room)"
+            >
+              立即签约
+            </button>
           </div>
         </div>
       </div>
@@ -310,6 +347,46 @@ const submitBatch = async () => {
         </div>
       </div>
     </div>
+
+    <!-- 签约弹窗 -->
+    <div v-if="showSignModal" class="modal-overlay" @click.self="showSignModal = false">
+      <div class="modal-content" style="width: 400px;">
+        <div class="modal-header">
+          <h3>📝 办理签约 - {{ signRoom?.room_number }}</h3>
+          <button class="close-btn" @click="showSignModal = false">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-item">
+            <label>租客姓名：</label>
+            <input v-model="signForm.tenant_name" class="input-text" placeholder="如：张三" />
+          </div>
+          <div class="form-item">
+            <label>联系电话：</label>
+            <input v-model="signForm.tenant_phone" class="input-text" placeholder="如：138..." />
+          </div>
+          <div class="form-item">
+            <label>月租金：</label>
+            <input v-model.number="signForm.monthly_rent" type="number" class="input-text" />
+          </div>
+          <div class="form-item">
+            <label>押金金额：</label>
+            <input v-model.number="signForm.deposit_amount" type="number" class="input-text" />
+          </div>
+          <div class="form-item">
+            <label>起租日期：</label>
+            <input v-model="signForm.start_date" type="date" class="input-text" />
+          </div>
+          <div class="form-item">
+            <label>到期日期：</label>
+            <input v-model="signForm.end_date" type="date" class="input-text" />
+          </div>
+          <div class="modal-footer">
+            <button class="btn-primary" style="width: 100%;" @click="submitSign">确认签约并生成账单</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
 </template>
 
 <style scoped>
@@ -365,4 +442,8 @@ const submitBatch = async () => {
 .batch-table label { margin-right: 8px; font-size: 13px; cursor: pointer; }
 .text-red { color: #f53f3f; background: none; border: none; cursor: pointer; }
 .modal-footer { margin-top: 24px; text-align: right; border-top: 1px solid #e5e6eb; padding-top: 16px; }
+
+.form-item { display: flex; align-items: center; margin-bottom: 12px; }
+.form-item label { width: 80px; font-size: 14px; color: #4e5969; }
+.form-item .input-text { flex: 1; }
 </style>

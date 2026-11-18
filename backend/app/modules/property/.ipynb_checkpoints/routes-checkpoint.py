@@ -200,3 +200,63 @@ def batch_create_property():
 
     db.session.commit()
     return jsonify({"code": "OK", "data": {"property_id": str(prop.property_id)}}), 201
+
+from datetime import datetime
+from app.modules.property.models import Tenancy, BillDraft, OutboxEvent
+from app.modules.property.schemas import SignTenancyRequest
+
+@property_bp.route('/rooms/<room_id>/sign', methods=['POST'])
+def sign_tenancy(room_id):
+    room = db.session.get(Room, room_id)
+    if not room:
+        return jsonify({"code": "NOT_FOUND_ROOM", "message": "房间不存在"}), 404
+    if room.room_status == 'OCCUPIED':
+        return jsonify({"code": "CONFLICT", "message": "房间已出租"}), 409
+
+    try:
+        data = SignTenancyRequest(**request.get_json())
+    except ValidationError as e:
+        return jsonify({"code": "VALIDATION_ERROR", "details": e.errors()}), 400
+
+    # 1. 创建租约
+    tenancy = Tenancy(
+        room_id=room_id,
+        tenant_name=data.tenant_name,
+        tenant_phone=data.tenant_phone,
+        monthly_rent=data.monthly_rent,
+        deposit_amount=data.deposit_amount,
+        start_date=datetime.strptime(data.start_date, '%Y-%m-%d').date(),
+        end_date=datetime.strptime(data.end_date, '%Y-%m-%d').date()
+    )
+    db.session.add(tenancy)
+    db.session.flush()
+
+    # 2. 更新房间状态
+    room.room_status = 'OCCUPIED'
+    room.current_tenancy_id = tenancy.tenancy_id
+
+    # 3. 生成首月账单草稿（理论应收 = 房租 + 押金）
+    total_amount = data.monthly_rent + data.deposit_amount
+    bill = BillDraft(
+        tenancy_id=tenancy.tenancy_id,
+        room_id=room_id,
+        theoretical_amount=total_amount,
+        actual_amount=total_amount
+    )
+    db.session.add(bill)
+
+    # 4. 发布事件（写入 Outbox）
+    event = OutboxEvent(
+        event_type='TenancySigned',
+        payload={
+            "tenancy_id": str(tenancy.tenancy_id),
+            "room_id": str(room_id),
+            "tenant_name": data.tenant_name,
+            "amount": str(total_amount)
+        }
+    )
+    db.session.add(event)
+
+    db.session.commit()
+
+    return jsonify({"code": "OK", "message": "签约成功，账单草稿已生成"}), 201
