@@ -73,3 +73,27 @@ def list_properties():
             for p in props
         ]
     })
+
+@property_bp.route('/properties/<property_id>/rooms', methods=['GET'])
+def list_rooms(property_id):
+    # 校验楼栋是否存在
+    prop = db.session.get(Property, property_id)
+    if not prop:
+        return jsonify({"code": "NOT_FOUND_PROPERTY", "message": "楼栋不存在"}), 404
+
+    # 查询该楼栋下的所有房间
+    rooms = db.session.query(Room).filter_by(property_id=property_id).all()
+    
+    return jsonify({
+        "code": "OK",
+        "data": [
+            {
+                "room_id": str(r.room_id),
+                "room_number": r.room_number,
+                "room_name": r.room_name,
+                "room_type": r.room_type,
+                "room_status": r.room_status
+            }
+            for r in rooms
+        ]
+    })

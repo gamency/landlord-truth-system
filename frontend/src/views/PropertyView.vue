@@ -2,14 +2,12 @@
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
 
-// 楼栋数据
 const properties = ref<any[]>([])
-// 当前选中的楼栋
 const activeProperty = ref<any>(null)
-// 当前楼栋下的房间
 const rooms = ref<any[]>([])
+const loading = ref(false)
 
-// 获取楼栋列表
+// 获取楼栋
 const fetchProperties = async () => {
   const res = await axios.get('/api/v1/property/properties')
   properties.value = res.data.data
@@ -18,17 +16,48 @@ const fetchProperties = async () => {
   }
 }
 
-// 选中楼栋，加载房间
+// 选中楼栋并获取房间
 const selectProperty = async (prop: any) => {
   activeProperty.value = prop
-  // 此处需要后端补充一个查询房间的接口，我们先假设接口是这样，如果报错，我们稍后再处理
+  loading.value = true
   try {
     const res = await axios.get(`/api/v1/property/properties/${prop.property_id}/rooms`)
     rooms.value = res.data.data
   } catch (e) {
-    // 如果后端还没写这个接口，先给个空数组兜底
+    console.error('获取房间失败', e)
     rooms.value = []
+  } finally {
+    loading.value = false
   }
+}
+
+// 新建楼栋
+const handleCreateProperty = async () => {
+  const name = prompt('请输入楼栋名称（如：幸福小区2栋）：')
+  if (!name) return
+  const address = prompt('请输入楼栋地址：')
+  if (!address) return
+  
+  await axios.post('/api/v1/property/properties', {
+    property_name: name,
+    address: address,
+    property_type: 'SELF_BUILT'
+  })
+  fetchProperties() // 刷新列表
+}
+
+// 添加房间
+const handleCreateRoom = async () => {
+  if (!activeProperty.value) return alert('请先选择楼栋')
+  const roomNumber = prompt('请输入房间号（如：204）：')
+  if (!roomNumber) return
+  
+  await axios.post(`/api/v1/property/properties/${activeProperty.value.property_id}/rooms`, {
+    room_number: roomNumber,
+    room_type: 'RENTAL',
+    room_name: roomNumber + '房'
+  })
+  selectProperty(activeProperty.value) // 刷新房间列表
 }
 
 onMounted(fetchProperties)
@@ -38,7 +67,7 @@ onMounted(fetchProperties)
   <div>
     <div class="page-header">
       <h1>房源管理</h1>
-      <button class="btn-primary">+ 新建楼栋</button>
+      <button class="btn-primary" @click="handleCreateProperty">+ 新建楼栋</button>
     </div>
 
     <div class="property-layout">
@@ -57,23 +86,28 @@ onMounted(fetchProperties)
 
       <!-- 房间网格 -->
       <div class="room-grid-container">
-        <h3>{{ activeProperty?.property_name }} - 房间列表</h3>
-        <div class="room-grid">
-          <!-- 这里用之前的文档数据做演示，因为后端可能还没写查房间的接口 -->
-          <div class="room-card vacant">
-            <h4>201房</h4>
-            <p>出租房</p>
-            <span class="status">空置</span>
-          </div>
-          <div class="room-card occupied">
-            <h4>202房</h4>
-            <p>出租房</p>
-            <span class="status">已租</span>
-          </div>
-           <div class="room-card vacant">
-            <h4>203房</h4>
-            <p>出租房</p>
-            <span class="status">空置</span>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h3>{{ activeProperty?.property_name }} - 房间列表</h3>
+          <button class="btn-primary" style="padding: 6px 12px; font-size: 14px;" @click="handleCreateRoom">+ 添加房间</button>
+        </div>
+        
+        <div v-if="loading" style="margin-top: 20px; color: #86909c;">正在加载房间数据...</div>
+        
+        <div v-else-if="rooms.length === 0" style="margin-top: 20px; color: #86909c;">
+          该楼栋下还没有房间，点击右上角“添加房间”试试。
+        </div>
+
+        <div v-else class="room-grid">
+          <div 
+            v-for="room in rooms" 
+            :key="room.room_id"
+            :class="['room-card', room.room_status === 'VACANT' ? 'vacant' : 'occupied']"
+          >
+            <h4>{{ room.room_name || room.room_number }}</h4>
+            <p>{{ room.room_type === 'RENTAL' ? '出租房' : room.room_type }}</p>
+            <span class="status">
+              {{ room.room_status === 'VACANT' ? '空置' : '已租' }}
+            </span>
           </div>
         </div>
       </div>
