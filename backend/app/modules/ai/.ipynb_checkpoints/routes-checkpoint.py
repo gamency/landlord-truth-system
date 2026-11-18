@@ -1,19 +1,17 @@
 import json
 import time
-from flask import Blueprint, request, Response, jsonify
+from flask import Blueprint, request, Response, jsonify, stream_with_context
 from app.shared.db import db
 from app.modules.property.models import ConfirmedBill, Room
 
 ai_bp = Blueprint('ai', __name__)
 
-# 简单的 Mock 意图识别
 def detect_intent(message: str):
     message = message.lower()
     if "账单" in message or "欠款" in message or "欠" in message:
         return "QUERY_BILLS"
     return "GENERAL_CHAT"
 
-# Tool: 查询未结清账单
 def tool_query_bills():
     bills = db.session.query(ConfirmedBill).filter(ConfirmedBill.remaining_amount > 0).all()
     result = []
@@ -63,4 +61,5 @@ def agent_chat():
             
         yield f"data: {json.dumps({'event': 'done'})}\n\n"
 
-    return Response(generate(), mimetype='text/event-stream')
+    # 核心修复：使用 stream_with_context 保持上下文
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
