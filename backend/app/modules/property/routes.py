@@ -260,3 +260,52 @@ def sign_tenancy(room_id):
     db.session.commit()
 
     return jsonify({"code": "OK", "message": "签约成功，账单草稿已生成"}), 201
+
+from app.modules.property.models import ConfirmedBill
+
+# 查询所有待确认的草稿
+@property_bp.route('/bills/drafts', methods=['GET'])
+def list_bill_drafts():
+    drafts = db.session.query(BillDraft).filter_by(status='DRAFT').all()
+    # 为了前端好展示，顺便带出房间号
+    result = []
+    for d in drafts:
+        room = db.session.get(Room, d.room_id)
+        result.append({
+            "draft_id": str(d.bill_draft_id),
+            "room_number": room.room_number if room else "未知",
+            "amount": float(d.actual_amount),
+            "status": d.status
+        })
+    return jsonify({"code": "OK", "data": result})
+
+# 确认账单草稿
+@property_bp.route('/bills/drafts/<draft_id>/confirm', methods=['POST'])
+def confirm_bill_draft(draft_id):
+    draft = db.session.get(BillDraft, draft_id)
+    if not draft or draft.status != 'DRAFT':
+        return jsonify({"code": "ERROR", "message": "草稿不存在或已处理"}), 400
+
+    # 1. 草稿状态改为已确认
+    draft.status = 'CONFIRMED'
+
+    # 2. 生成正式账单
+    confirmed_bill = ConfirmedBill(
+        source_draft_id=draft.bill_draft_id,
+        tenancy_id=draft.tenancy_id,
+        room_id=draft.room_id,
+        amount=draft.actual_amount,
+        remaining_amount=draft.actual_amount,
+        status='CONFIRMED'
+    )
+    db.session.add(confirmed_bill)
+
+    # 3. 发布事件
+    event = OutboxEvent(
+        event_type='BillConfirmed',
+        payload={"bill_id": str(confirmed_bill.bill_id), "amount": str(confirmed_bill.amount)}
+    )
+    db.session.add(event)
+    db.session.commit()
+
+    return jsonify({"code": "OK", "message": "账单已确认，等待发送"})

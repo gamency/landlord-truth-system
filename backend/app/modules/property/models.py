@@ -95,3 +95,17 @@ class OutboxEvent(db.Model):
     payload = db.Column(JSONB, nullable=False)
     status = db.Column(db.String(20), default='PENDING')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class ConfirmedBill(db.Model):
+    __tablename__ = 'confirmed_bill'
+    bill_id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_draft_id = db.Column(UUID(as_uuid=True), nullable=True) # 关联来源草稿
+    tenancy_id = db.Column(UUID(as_uuid=True), nullable=False)
+    room_id = db.Column(UUID(as_uuid=True), nullable=False)
+    
+    amount = db.Column(db.Numeric(14, 2), nullable=False) # 账单总额
+    paid_amount = db.Column(db.Numeric(14, 2), default=0) # 已收金额
+    remaining_amount = db.Column(db.Numeric(14, 2), nullable=False) # 剩余欠款
+    
+    status = db.Column(db.String(20), default='CONFIRMED') # CONFIRMED, SENT, PAID
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

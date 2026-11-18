@@ -9,7 +9,7 @@
       <h2>房东真相</h2>
       <nav>
         <RouterLink to="/property" class="nav-item">🏢 房源管理</RouterLink>
-        <a class="nav-item disabled">📄 账单管理 (待开发)</a>
+        <RouterLink to="/billing" class="nav-item">📄 账单管理</RouterLink>
         <a class="nav-item disabled">📊 对账管理 (待开发)</a>
       </nav>
     </aside>
