@@ -23,6 +23,10 @@ def create_app():
 
         # 注册蓝图
     from app.modules.property.routes import property_bp
+    from app.modules.ai.routes import ai_bp
+    
+    # 注册蓝图
     app.register_blueprint(property_bp, url_prefix='/api/v1/property')
+    app.register_blueprint(ai_bp, url_prefix='/api/v1/ai')
 
     return app

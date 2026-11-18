@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // 这里暂时不需要逻辑
+import AgentChat from './components/AgentChat.vue'
 </script>
 
 <template>
@@ -18,6 +19,8 @@
     <main class="main-content">
       <RouterView />
     </main>
+    <!-- 新增 AI 助手 -->
+    <AgentChat />
   </div>
 </template>
 
