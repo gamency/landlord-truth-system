@@ -19,3 +19,16 @@ class CreateMeterRequest(BaseModel):
     meter_type: str # ELECTRIC, COLD_WATER, HOT_WATER
     meter_number: str
     initial_reading: float = 0.0
+
+class BatchCreateFloor(BaseModel):
+    floor_number: int
+    room_count: int
+    room_type: str # RENTAL, SHOP, SELF_USE
+    has_hot_water: bool = True
+    has_cold_water: bool = True
+    has_electric: bool = True
+
+class BatchCreatePropertyRequest(BaseModel):
+    property_name: str
+    address: str
+    floors: list[BatchCreateFloor]

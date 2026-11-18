@@ -155,3 +155,48 @@ def bind_meter(room_id):
     db.session.commit()
 
     return jsonify({"code": "OK", "data": {"meter_id": str(new_meter.meter_id)}}), 201
+
+from app.modules.property.schemas import BatchCreatePropertyRequest
+
+@property_bp.route('/properties/batch', methods=['POST'])
+def batch_create_property():
+    try:
+        data = BatchCreatePropertyRequest(**request.get_json())
+    except ValidationError as e:
+        return jsonify({"code": "VALIDATION_ERROR", "details": e.errors()}), 400
+
+    # 1. 创建楼栋
+    prop = Property(
+        property_name=data.property_name,
+        address=data.address,
+        property_type="SELF_BUILT",
+    )
+    db.session.add(prop)
+    db.session.flush() # 先拿到 property_id
+
+    # 2. 循环生成楼层和房间
+    for floor in data.floors:
+        for i in range(1, floor.room_count + 1):
+            # 自动生成房间号：如 201, 202, 101
+            room_num = f"{floor.floor_number}0{i}" if i < 10 else f"{floor.floor_number}{i}"
+            
+            room = Room(
+                property_id=prop.property_id,
+                room_number=room_num,
+                room_name=f"{room_num}房" if floor.room_type == 'RENTAL' else f"{room_num}商铺",
+                room_type=floor.room_type,
+            )
+            db.session.add(room)
+            db.session.flush() # 拿到 room_id
+
+            # 3. 自动绑定表计（表号按规则生成，房东无需手填）
+            if floor.room_type in ['RENTAL', 'SHOP']:
+                if floor.has_electric:
+                    db.session.add(Meter(room_id=room.room_id, property_id=prop.property_id, meter_type='ELECTRIC', meter_number=f"E-{room_num}", initial_reading=0, current_reading=0))
+                if floor.has_cold_water:
+                    db.session.add(Meter(room_id=room.room_id, property_id=prop.property_id, meter_type='COLD_WATER', meter_number=f"W-{room_num}", initial_reading=0, current_reading=0))
+                if floor.has_hot_water:
+                    db.session.add(Meter(room_id=room.room_id, property_id=prop.property_id, meter_type='HOT_WATER', meter_number=f"H-{room_num}", initial_reading=0, current_reading=0))
+
+    db.session.commit()
+    return jsonify({"code": "OK", "data": {"property_id": str(prop.property_id)}}), 201

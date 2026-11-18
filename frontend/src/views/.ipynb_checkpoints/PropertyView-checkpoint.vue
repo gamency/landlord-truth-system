@@ -100,13 +100,62 @@ const handleBindMeter = async (type: string, label: string) => {
     alert(e.response?.data?.message || '绑定失败')
   }
 }
+
+// ... 保留之前的代码 ...
+
+const showBatchModal = ref(false)
+// 默认给一个 1 楼商铺、2楼出租房的模板
+const batchForm = ref({
+  property_name: '',
+  address: '',
+  floors: [
+    { floor_number: 1, room_count: 2, room_type: 'SHOP', has_electric: true, has_cold_water: true, has_hot_water: false },
+    { floor_number: 2, room_count: 6, room_type: 'RENTAL', has_electric: true, has_cold_water: true, has_hot_water: true }
+  ]
+})
+
+const addFloorRow = () => {
+  const nextFloor = batchForm.value.floors.length > 0 
+    ? Math.max(...batchForm.value.floors.map(f => f.floor_number)) + 1 
+    : 1
+  batchForm.value.floors.push({
+    floor_number: nextFloor, room_count: 1, room_type: 'RENTAL', 
+    has_electric: true, has_cold_water: true, has_hot_water: true
+  })
+}
+
+const removeFloorRow = (index: number) => {
+  batchForm.value.floors.splice(index, 1)
+}
+
+const submitBatch = async () => {
+  if (!batchForm.value.property_name || !batchForm.value.address) {
+    return alert('请填写楼栋名称和地址')
+  }
+  if (batchForm.value.floors.length === 0) {
+    return alert('至少需要配置一层楼')
+  }
+  
+  try {
+    await axios.post('/api/v1/property/properties/batch', batchForm.value)
+    alert('批量生成成功！')
+    showBatchModal.value = false
+    fetchProperties()
+  } catch (e: any) {
+    alert('生成失败：' + (e.response?.data?.message || e.message))
+  }
+}
+
 </script>
 
 <template>
   <div>
     <div class="page-header">
       <h1>房源管理</h1>
-      <button class="btn-primary" @click="handleCreateProperty">+ 新建楼栋</button>
+      <div>
+        <button class="btn-secondary" @click="handleCreateProperty">单栋添加</button>
+        <button class="btn-primary" style="margin-left: 10px;" @click="showBatchModal = true">🚀 一键生成楼栋</button>
+      </div>
     </div>
 
     <div class="property-layout">
@@ -200,6 +249,67 @@ const handleBindMeter = async (type: string, label: string) => {
       </div>
     </div>
   </div>
+    <!-- 批量生成向导弹窗 -->
+    <div v-if="showBatchModal" class="modal-overlay" @click.self="showBatchModal = false">
+      <div class="modal-content" style="width: 650px;">
+        <div class="modal-header">
+          <h3>🚀 一键批量生成房源</h3>
+          <button class="close-btn" @click="showBatchModal = false">×</button>
+        </div>
+        
+        <div class="modal-body">
+          <div class="form-group">
+            <label>楼栋名称：</label>
+            <input v-model="batchForm.property_name" type="text" placeholder="如：幸福小区2栋" class="input-text" />
+            <label style="margin-left: 20px;">楼栋地址：</label>
+            <input v-model="batchForm.address" type="text" placeholder="如：XX县XX路XX号" class="input-text" style="width: 200px;" />
+          </div>
+
+          <h4 style="margin-top: 24px; margin-bottom: 12px;">楼层与房间结构配置</h4>
+          <table class="batch-table">
+            <thead>
+              <tr>
+                <th>楼层</th>
+                <th>房间数</th>
+                <th>房间类型</th>
+                <th>包含表计</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(floor, index) in batchForm.floors" :key="index">
+                <td>
+                  <input v-model.number="floor.floor_number" type="number" class="input-small" /> 楼
+                </td>
+                <td>
+                  <input v-model.number="floor.room_count" type="number" class="input-small" /> 间
+                </td>
+                <td>
+                  <select v-model="floor.room_type" class="input-small">
+                    <option value="RENTAL">出租房</option>
+                    <option value="SHOP">商铺</option>
+                    <option value="SELF_USE">自住</option>
+                  </select>
+                </td>
+                <td>
+                  <label><input type="checkbox" v-model="floor.has_electric" /> 💡电</label>
+                  <label><input type="checkbox" v-model="floor.has_cold_water" /> 💧冷水</label>
+                  <label><input type="checkbox" v-model="floor.has_hot_water" /> 🔥热水</label>
+                </td>
+                <td>
+                  <button @click="removeFloorRow(index)" class="text-red">删除</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <button class="btn-secondary" style="margin-top: 12px; font-size: 12px;" @click="addFloorRow">+ 增加楼层</button>
+
+          <div class="modal-footer">
+            <button class="btn-primary" @click="submitBatch">确认生成结构</button>
+          </div>
+        </div>
+      </div>
+    </div>
 </template>
 
 <style scoped>
@@ -245,4 +355,14 @@ const handleBindMeter = async (type: string, label: string) => {
 .btn-small { background: #e8f3ff; color: #1677ff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
 .btn-small:hover { background: #1677ff; color: white; }
 .bound-text { color: #00b42a; font-size: 14px; font-weight: bold; }
+
+.btn-secondary { background: white; border: 1px solid #1677ff; color: #1677ff; padding: 10px 16px; border-radius: 4px; cursor: pointer; }
+.form-group { display: flex; align-items: center; margin-bottom: 20px; }
+.input-text { border: 1px solid #e5e6eb; padding: 8px; border-radius: 4px; margin-left: 10px; }
+.batch-table { width: 100%; border-collapse: collapse; text-align: left; }
+.batch-table th, .batch-table td { padding: 12px 8px; border-bottom: 1px solid #e5e6eb; font-size: 14px; }
+.input-small { border: 1px solid #e5e6eb; padding: 4px 8px; border-radius: 4px; width: 60px; }
+.batch-table label { margin-right: 8px; font-size: 13px; cursor: pointer; }
+.text-red { color: #f53f3f; background: none; border: none; cursor: pointer; }
+.modal-footer { margin-top: 24px; text-align: right; border-top: 1px solid #e5e6eb; padding-top: 16px; }
 </style>
