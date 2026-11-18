@@ -1,39 +1,40 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-
-const properties = ref<any[]>([])
-const loading = ref(false)
-const error = ref('')
-
-async function loadProperties() {
-  loading.value = true
-  error.value = ''
-  try {
-    const res = await fetch('/api/v1/property/properties')
-    const json = await res.json()
-    properties.value = json.data
-  } catch (e: any) {
-    error.value = e.message
-  } finally {
-    loading.value = false
-  }
-}
-
-onMounted(loadProperties)
+// 这里暂时不需要逻辑
 </script>
 
 <template>
-  <div style="padding: 20px; font-family: sans-serif;">
-    <h1>房东经营真相系统 - 前端骨架</h1>
-    <button @click="loadProperties" :disabled="loading">
-      {{ loading ? '加载中...' : '刷新楼栋列表' }}
-    </button>
-    <p v-if="error" style="color: red;">错误：{{ error }}</p>
-    <ul>
-      <li v-for="p in properties" :key="p.property_id">
-        {{ p.property_name }} - {{ p.address }} ({{ p.status }})
-      </li>
-    </ul>
-    <p v-if="!loading && properties.length === 0">暂无楼栋数据</p>
+  <div class="app-layout">
+    <!-- 左侧导航 -->
+    <aside class="sidebar">
+      <h2>房东真相</h2>
+      <nav>
+        <RouterLink to="/property" class="nav-item">🏢 房源管理</RouterLink>
+        <a class="nav-item disabled">📄 账单管理 (待开发)</a>
+        <a class="nav-item disabled">📊 对账管理 (待开发)</a>
+      </nav>
+    </aside>
+
+    <!-- 右侧内容区 -->
+    <main class="main-content">
+      <RouterView />
+    </main>
   </div>
 </template>
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: sans-serif; background-color: #f5f7fa; color: #333; }
+.app-layout { display: flex; height: 100vh; }
+.sidebar {
+  width: 220px; background: #fff; border-right: 1px solid #e5e6eb;
+  padding: 20px 0; display: flex; flex-direction: column;
+}
+.sidebar h2 { padding: 0 20px 20px; font-size: 20px; color: #1677ff; }
+.nav-item {
+  display: block; padding: 12px 20px; color: #4e5969; text-decoration: none;
+  cursor: pointer; transition: background 0.2s;
+}
+.nav-item:hover, .nav-item.router-link-active { background: #e8f3ff; color: #1677ff; font-weight: bold; }
+.nav-item.disabled { color: #c9cdd4; cursor: not-allowed; }
+.main-content { flex: 1; padding: 24px; overflow-y: auto; }
+</style>
