@@ -637,3 +637,61 @@ def real_ocr_reading(room_id):
             "last_reading": last_value
         }
     })
+
+@property_bp.route('/dashboard', methods=['GET'])
+def get_dashboard_data():
+    # 1. 查出所有房间
+    rooms = db.session.query(Room).all()
+    
+    # 2. 查出所有有欠款的账单
+    unpaid_bills = db.session.query(ConfirmedBill).filter(ConfirmedBill.remaining_amount > 0).all()
+    # 建立房间ID到欠款金额的映射
+    bill_map = {str(b.room_id): float(b.remaining_amount) for b in unpaid_bills}
+    
+    # 3. 按楼层聚合（假设房间号第一位是楼层，比如 201 是 2楼）
+    floors_dict = {}
+    for r in rooms:
+        # 简单解析楼层号
+        floor_num = int(r.room_number[0]) if r.room_number and r.room_number[0].isdigit() else 1
+        
+        if floor_num not in floors_dict:
+            floors_dict[floor_num] = []
+            
+        unpaid = bill_map.get(str(r.room_id), 0)
+        
+        # 查找当前租客（如果是已租）
+        tenant_name = ""
+        if r.current_tenancy_id:
+            tenancy = db.session.get(Tenancy, r.current_tenancy_id)
+            if tenancy:
+                tenant_name = tenancy.tenant_name
+
+        floors_dict[floor_num].append({
+            "room_id": str(r.room_id),
+            "room_number": r.room_number,
+            "status": r.room_status,
+            "tenant_name": tenant_name,
+            "unpaid": unpaid
+        })
+    
+    # 4. 整理并按楼层倒序（高层在上）
+    sorted_floors = [{"floor_number": k, "rooms": floors_dict[k]} for k in sorted(floors_dict.keys(), reverse=True)]
+    
+    # 5. 全局汇总数据
+    total_rooms = len(rooms)
+    occupied_rooms = len([r for r in rooms if r.room_status == 'OCCUPIED'])
+    vacant_rooms = total_rooms - occupied_rooms
+    total_unpaid = sum(bill_map.values())
+
+    return jsonify({
+        "code": "OK",
+        "data": {
+            "summary": {
+                "total": total_rooms,
+                "occupied": occupied_rooms,
+                "vacant": vacant_rooms,
+                "total_unpaid": total_unpaid
+            },
+            "floors": sorted_floors
+        }
+    })
