@@ -5,6 +5,11 @@ from app.modules.property.models import Property, Room, Meter, Tenancy, BillDraf
 from app.modules.property.schemas import CreatePropertyRequest, CreateRoomRequest, CreateMeterRequest, BatchCreatePropertyRequest, SignTenancyRequest, RecordPaymentRequest, WriteOffRequest
 from datetime import datetime
 import random
+import os
+import base64
+from werkzeug.utils import secure_filename
+from openai import OpenAI
+from app.config import settings
 
 property_bp = Blueprint('property', __name__)
 
@@ -253,7 +258,6 @@ def sign_tenancy(room_id):
     db.session.commit()
 
     return jsonify({"code": "OK", "message": "签约成功，账单草稿已生成"}), 201
-
 
 # 查询所有待确认的草稿
 @property_bp.route('/bills/drafts', methods=['GET'])
@@ -535,3 +539,101 @@ def correct_reading(reading_id):
         
     db.session.commit()
     return jsonify({"code": "OK", "message": "修正成功"})
+
+# ================= 真实的 AI OCR 视觉识别 =================
+# 初始化视觉大模型客户端
+vision_client = OpenAI(
+    api_key=settings.AI_LLM_API_KEY,
+    base_url=settings.AI_LLM_BASE_URL
+)
+
+@property_bp.route('/rooms/<room_id>/ocr-upload', methods=['POST'])
+def real_ocr_reading(room_id):
+    room = db.session.get(Room, room_id)
+    if not room:
+        return jsonify({"code": "NOT_FOUND", "message": "房间不存在"}), 404
+        
+    meter = db.session.query(Meter).filter_by(room_id=room_id, meter_type='ELECTRIC').first()
+    if not meter:
+        return jsonify({"code": "ERROR", "message": "该房间未绑定电表"}), 400
+
+    if 'file' not in request.files:
+        return jsonify({"code": "ERROR", "message": "未上传图片"}), 400
+        
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"code": "ERROR", "message": "图片文件名为空"}), 400
+
+    # 1. 保存图片到本地
+    filename = secure_filename(file.filename)
+    filepath = os.path.join('uploads', filename)
+    os.makedirs('uploads', exist_ok=True)
+    file.save(filepath)
+
+    # 2. 转成 Base64 喂给多模态大模型
+    with open(filepath, "rb") as image_file:
+        base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+
+    try:
+        # 注意：这里的 model 需要填支持视觉的多模态 Endpoint
+        # 如果你火山引擎只开了一个普通文本模型，这里可能会报错
+        # 建议去火山引擎再开通一个 Doubao-vision 的 Endpoint ID，填入 settings.AI_VISION_MODEL
+        vision_model = os.getenv("AI_VISION_MODEL", settings.AI_LLM_MODEL) 
+        
+        response = vision_client.chat.completions.create(
+            model=vision_model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "你是一个精准的电表读数识别专家。请仔细看这张图片，识别表盘上的数字读数。直接输出数字（保留两位小数），不要输出任何其他文字。"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    ]
+                }
+            ],
+            max_tokens=20
+        )
+        
+        ai_text = response.choices[0].message.content.strip()
+        # 简单清理一下可能返回的非数字字符
+        import re
+        nums = re.findall(r'\d+\.?\d*', ai_text)
+        if not nums:
+            raise ValueError(f"未能识别出数字，模型返回：{ai_text}")
+            
+        mock_value = float(nums[0])
+
+    except Exception as e:
+        return jsonify({"code": "AI_ERROR", "message": f"AI识别失败: {str(e)}"}), 500
+
+    # 3. 业务逻辑：判断是否倒挂，落库
+    last_value = float(meter.current_reading or 0)
+    status = 'SUCCESS'
+    if mock_value < last_value:
+        status = 'ANOMALY' # 读数倒挂
+
+    # 模拟置信度（视觉大模型目前不直接返回置信度，我们按业务规则默认 98%）
+    confidence = 0.98
+
+    reading = MeterReading(
+        room_id=room_id,
+        meter_id=meter.meter_id,
+        read_value=mock_value,
+        confidence=confidence,
+        image_url=f"/{filepath}",
+        status=status
+    )
+    db.session.add(reading)
+    db.session.commit()
+
+    return jsonify({
+        "code": "OK",
+        "data": {
+            "reading_id": str(reading.reading_id),
+            "room_number": room.room_number,
+            "value": reading.read_value,
+            "confidence": reading.confidence,
+            "status": reading.status,
+            "last_reading": last_value
+        }
+    })

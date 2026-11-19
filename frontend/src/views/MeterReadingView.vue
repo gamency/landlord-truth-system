@@ -22,17 +22,42 @@ const fetchReadings = async () => {
   readings.value = res.data.data
 }
 
-// 模拟拍照上传
-const simulateCapture = async (room: any) => {
+// 真实的图片上传识别
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const selectedRoom = ref<any>(null)
+
+// 触发选图
+const triggerUpload = (room: any) => {
   if (room.room_status === 'VACANT') return alert('空置房间无需抄表')
+  selectedRoom.value = room
+  fileInputRef.value?.click()
+}
+
+// 处理文件上传
+const handleFileUpload = async (event: Event) => {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file || !selectedRoom.value) return
+
   loading.value = true
+  const formData = new FormData()
+  formData.append('file', file)
+
   try {
-    await axios.post(`/api/v1/property/rooms/${room.room_id}/ocr-mock`)
-    fetchReadings()
+    await axios.post(`/api/v1/property/rooms/${selectedRoom.value.room_id}/ocr-upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    fetchReadings() // 刷新列表
+  } catch (e: any) {
+    alert(e.response?.data?.message || '图片识别失败')
   } finally {
     loading.value = false
+    // 清空 input，允许重复上传同一张图
+    target.value = ''
   }
 }
+
+// 原有的模拟单拍和连拍可以保留作为“演示模式”，但我们需要把真实上传入口暴露出来
 
 // 一键连续拍照
 const batchCapture = async () => {
@@ -74,16 +99,26 @@ onMounted(() => {
     <div class="layout">
       <!-- 左侧：模拟相机/房间列表 -->
       <div class="camera-panel">
-        <h3>选择房间进行单拍</h3>
+        <h3>选择房间上传电表照片</h3>
+        <!-- 隐藏的文件输入框 -->
+        <input type="file" ref="fileInputRef" @change="handleFileUpload" accept="image/*" style="display: none;" />
+        
         <div class="room-tags">
           <button 
             v-for="r in rooms" 
             :key="r.room_id" 
             :disabled="r.room_status === 'VACANT' || loading"
-            @click="simulateCapture(r)"
+            @click="triggerUpload(r)"
             :class="['tag', r.room_status === 'VACANT' ? 'disabled' : '']"
           >
-            {{ r.room_number }}
+            📷 {{ r.room_number }} 拍照
+          </button>
+        </div>
+        
+        <div style="margin-top: 30px; border-top: 1px dashed #e5e6eb; padding-top: 20px;">
+          <p style="font-size: 12px; color: #86909c; margin-bottom: 10px;">测试提示：</p>
+          <button class="btn-primary" style="background: #f2f3f5; color: #4e5969; font-size: 13px;" @click="batchCapture">
+            (演示模式) 一键模拟连拍
           </button>
         </div>
       </div>

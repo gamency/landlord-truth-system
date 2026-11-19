@@ -1,0 +1,36 @@
+// 真实的图片上传识别
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const selectedRoom = ref<any>(null)
+
+// 触发选图
+const triggerUpload = (room: any) => {
+  if (room.room_status === 'VACANT') return alert('空置房间无需抄表')
+  selectedRoom.value = room
+  fileInputRef.value?.click()
+}
+
+// 处理文件上传
+const handleFileUpload = async (event: Event) => {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file || !selectedRoom.value) return
+
+  loading.value = true
+  const formData = new FormData()
+  formData.append('file', file)
+
+  try {
+    await axios.post(`/api/v1/property/rooms/${selectedRoom.value.room_id}/ocr-upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    fetchReadings() // 刷新列表
+  } catch (e: any) {
+    alert(e.response?.data?.message || '图片识别失败')
+  } finally {
+    loading.value = false
+    // 清空 input，允许重复上传同一张图
+    target.value = ''
+  }
+}
+
+// 原有的模拟单拍和连拍可以保留作为“演示模式”，但我们需要把真实上传入口暴露出来
