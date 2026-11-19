@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional, Any
+from datetime import date
 
 class CreatePropertyRequest(BaseModel):
     property_name: str
@@ -12,8 +13,6 @@ class CreateRoomRequest(BaseModel):
     room_type: str = "RENTAL"
     room_name: Optional[str] = None
     layout: Optional[dict[str, Any]] = None
-
-from typing import Optional
 
 class CreateMeterRequest(BaseModel):
     meter_type: str # ELECTRIC, COLD_WATER, HOT_WATER
@@ -32,8 +31,6 @@ class BatchCreatePropertyRequest(BaseModel):
     property_name: str
     address: str
     floors: list[BatchCreateFloor]
-
-from datetime import date
 
 class SignTenancyRequest(BaseModel):
     tenant_name: str

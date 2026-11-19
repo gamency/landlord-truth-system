@@ -1,65 +1,99 @@
 import json
 import time
-from flask import Blueprint, request, Response, jsonify, stream_with_context
+from flask import Blueprint, request, Response, stream_with_context
+from openai import OpenAI
+from app.config import settings
 from app.shared.db import db
 from app.modules.property.models import ConfirmedBill, Room
 
 ai_bp = Blueprint('ai', __name__)
 
-def detect_intent(message: str):
-    message = message.lower()
-    if "账单" in message or "欠款" in message or "欠" in message:
-        return "QUERY_BILLS"
-    return "GENERAL_CHAT"
+# 初始化大模型客户端
+client = OpenAI(
+    api_key=settings.AI_LLM_API_KEY,
+    base_url=settings.AI_LLM_BASE_URL
+)
 
-def tool_query_bills():
+# 定义给大模型用的工具集 (Schema)
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "query_unpaid_bills",
+            "description": "查询系统中所有未结清的账单和欠款",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+]
+
+# 本地实际执行查库的函数
+def execute_query_bills():
     bills = db.session.query(ConfirmedBill).filter(ConfirmedBill.remaining_amount > 0).all()
     result = []
     for b in bills:
         room = db.session.get(Room, b.room_id)
-        result.append({"room": room.room_number if room else "未知", "amount": float(b.remaining_amount)})
-    return result
+        result.append({"room_number": room.room_number if room else "未知", "amount": float(b.remaining_amount)})
+    return json.dumps(result, ensure_ascii=False)
 
 @ai_bp.route('/chat', methods=['POST'])
 def agent_chat():
     data = request.get_json()
-    message = data.get('message', '')
+    user_message = data.get('message', '')
     
     def generate():
-        # 1. 意图识别
-        intent = detect_intent(message)
-        yield f"data: {json.dumps({'event': 'trace', 'text': '🤖 正在分析您的意图...'})}\n\n"
-        time.sleep(0.5)
-        
-        if intent == "QUERY_BILLS":
-            yield f"data: {json.dumps({'event': 'trace', 'text': '🎯 识别到意图：查询未结清账单'})}\n\n"
-            time.sleep(0.5)
+        try:
+            messages = [
+                {"role": "system", "content": "你是一个专业的房东经营助手。回答要简洁、热情，称呼我为老板。如果需要查数据，请调用工具。"},
+                {"role": "user", "content": user_message}
+            ]
             
-            # 2. 调用 Tool
-            yield f"data: {json.dumps({'event': 'trace', 'text': '🛠️ 正在调用系统工具: QueryBills...'})}\n\n"
-            bills = tool_query_bills()
-            time.sleep(0.5)
+            # 第一阶段：请求大模型（判断是否需要调工具）
+            response = client.chat.completions.create(
+                model=settings.AI_LLM_MODEL,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                stream=False # 第一阶段不用流式，先判断意图
+            )
             
-            # 3. 生成回答
-            yield f"data: {json.dumps({'event': 'trace', 'text': '✅ 数据获取成功，正在生成回答...'})}\n\n"
-            time.sleep(0.5)
+            response_message = response.choices[0].message
+            tool_calls = response_message.tool_calls
             
-            if not bills:
-                answer = "太棒了老板！我刚才查了一下系统，目前所有房间的账单都已经结清了，没有任何欠款。"
-            else:
-                answer = "老板，我帮您查了一下，目前系统里有以下未结清的账单：\n"
-                for b in bills:
-                    answer += f"- **{b['room']}房**：欠款 **¥{b['amount']:.2f}**\n"
-                answer += "\n需要我帮您生成催收话术发给租客吗？"
-        else:
-            answer = "老板您好！我是您的 AI 经营助手。您可以直接问我“谁还欠钱？”或者“这个月利润怎么样？”，我会立刻帮您去查。"
+            if tool_calls:
+                # 通知前端：Agent 正在调用工具
+                yield f"data: {json.dumps({'event': 'trace', 'text': '🛠️ 识别到需要查询数据，正在调用系统工具...'})}\n\n"
+                
+                messages.append(response_message)
+                
+                # 本地执行工具
+                for tool_call in tool_calls:
+                    if tool_call.function.name == "query_unpaid_bills":
+                        function_response = execute_query_bills()
+                        messages.append({
+                            "tool_call_id": tool_call.id,
+                            "role": "tool",
+                            "name": tool_call.function.name,
+                            "content": function_response,
+                        })
+                
+                yield f"data: {json.dumps({'event': 'trace', 'text': '✅ 数据获取成功，正在生成回答...'})}\n\n"
+            
+            # 第二阶段：将工具结果喂回大模型，开始流式输出
+            stream = client.chat.completions.create(
+                model=settings.AI_LLM_MODEL,
+                messages=messages,
+                stream=True
+            )
+            
+            for chunk in stream:
+                if chunk.choices[0].delta.content is not None:
+                    text = chunk.choices[0].delta.content
+                    yield f"data: {json.dumps({'event': 'message', 'text': text}, ensure_ascii=False)}\n\n"
+                    
+            yield f"data: {json.dumps({'event': 'done'})}\n\n"
 
-        # 逐字流式输出回答，模拟大模型打字机效果
-        for char in answer:
-            yield f"data: {json.dumps({'event': 'message', 'text': char}, ensure_ascii=False)}\n\n"
-            time.sleep(0.02)
-            
-        yield f"data: {json.dumps({'event': 'done'})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'event': 'message', 'text': f'\n[系统报错: {str(e)}]'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'event': 'done'})}\n\n"
 
-    # 核心修复：使用 stream_with_context 保持上下文
     return Response(stream_with_context(generate()), mimetype='text/event-stream')

@@ -1,8 +1,10 @@
 from flask import Blueprint, request, jsonify
 from pydantic import ValidationError
 from app.shared.db import db
-from app.modules.property.models import Property, Room
-from app.modules.property.schemas import CreatePropertyRequest, CreateRoomRequest
+from app.modules.property.models import Property, Room, Meter, Tenancy, BillDraft, OutboxEvent, MeterReading, Payment, WriteOffRecord, ConfirmedBill
+from app.modules.property.schemas import CreatePropertyRequest, CreateRoomRequest, CreateMeterRequest, BatchCreatePropertyRequest, SignTenancyRequest, RecordPaymentRequest, WriteOffRequest
+from datetime import datetime
+import random
 
 property_bp = Blueprint('property', __name__)
 
@@ -98,9 +100,6 @@ def list_rooms(property_id):
         ]
     })
 
-from app.modules.property.models import Meter
-from app.modules.property.schemas import CreateMeterRequest
-
 @property_bp.route('/rooms/<room_id>', methods=['GET'])
 def get_room_detail(room_id):
     room = db.session.get(Room, room_id)
@@ -156,8 +155,6 @@ def bind_meter(room_id):
 
     return jsonify({"code": "OK", "data": {"meter_id": str(new_meter.meter_id)}}), 201
 
-from app.modules.property.schemas import BatchCreatePropertyRequest
-
 @property_bp.route('/properties/batch', methods=['POST'])
 def batch_create_property():
     try:
@@ -200,10 +197,6 @@ def batch_create_property():
 
     db.session.commit()
     return jsonify({"code": "OK", "data": {"property_id": str(prop.property_id)}}), 201
-
-from datetime import datetime
-from app.modules.property.models import Tenancy, BillDraft, OutboxEvent
-from app.modules.property.schemas import SignTenancyRequest
 
 @property_bp.route('/rooms/<room_id>/sign', methods=['POST'])
 def sign_tenancy(room_id):
@@ -261,8 +254,6 @@ def sign_tenancy(room_id):
 
     return jsonify({"code": "OK", "message": "签约成功，账单草稿已生成"}), 201
 
-from app.modules.property.models import ConfirmedBill
-
 # 查询所有待确认的草稿
 @property_bp.route('/bills/drafts', methods=['GET'])
 def list_bill_drafts():
@@ -309,9 +300,6 @@ def confirm_bill_draft(draft_id):
     db.session.commit()
 
     return jsonify({"code": "OK", "message": "账单已确认，等待发送"})
-
-from app.modules.property.models import Payment, WriteOffRecord
-from app.modules.property.schemas import RecordPaymentRequest, WriteOffRequest
 
 # 1. 查询所有已确认未结清的账单
 @property_bp.route('/bills/confirmed', methods=['GET'])
@@ -462,9 +450,6 @@ def direct_pay_bill(bill_id):
     
     db.session.commit()
     return jsonify({"code": "OK", "message": "收款成功"})
-
-from app.modules.property.models import MeterReading
-import random
 
 # 1. 模拟 AI 识别接口（接收房间，返回随机数字）
 @property_bp.route('/rooms/<room_id>/ocr-mock', methods=['POST'])
