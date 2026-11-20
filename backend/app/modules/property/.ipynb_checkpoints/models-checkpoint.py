@@ -141,3 +141,12 @@ class MeterReading(db.Model):
     status = db.Column(db.String(20), default='PENDING') # PENDING, SUCCESS, ANOMALY, MANUALLY_CORRECTED
     
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class ExternalBill(db.Model):
+    __tablename__ = 'external_bill'
+    bill_id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    bill_type = db.Column(db.String(20), nullable=False) # ELECTRIC, WATER
+    amount = db.Column(db.Numeric(14, 2), nullable=False)
+    usage = db.Column(db.Numeric(14, 2), nullable=False)
+    period = db.Column(db.String(20), nullable=False) # 比如 '2026-11'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

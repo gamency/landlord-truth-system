@@ -695,3 +695,54 @@ def get_dashboard_data():
             "floors": sorted_floors
         }
     })
+
+from app.modules.property.models import ExternalBill
+import calendar
+from datetime import datetime
+
+# 1. 录入外部账单
+@property_bp.route('/external-bills', methods=['POST'])
+def create_external_bill():
+    data = request.get_json()
+    bill = ExternalBill(
+        bill_type=data.get('bill_type', 'ELECTRIC'),
+        amount=data.get('amount'),
+        usage=data.get('usage'),
+        period=data.get('period', datetime.now().strftime('%Y-%m'))
+    )
+    db.session.add(bill)
+    db.session.commit()
+    return jsonify({"code": "OK", "message": "外部账单录入成功"})
+
+# 2. 获取水电收支趋势数据（近6个月）
+@property_bp.route('/statistics/water-electric', methods=['GET'])
+def get_we_statistics():
+    # 这里为了演示，我们动态生成最近6个月的模拟趋势数据
+    # 真实业务中，这里应该按月份 GROUP BY 统计 ExternalBill 和 ConfirmedBill 中的水电费
+    import random
+    
+    months = []
+    now = datetime.now()
+    for i in range(5, -1, -1):
+        month_num = now.month - i
+        year = now.year
+        if month_num <= 0:
+            month_num += 12
+            year -= 1
+        months.append(f"{year}-{month_num:02d}")
+
+    result = []
+    for m in months:
+        # 模拟外部成本（比如供电局收了你 1200，水厂收了你 300）
+        external_cost = random.randint(1000, 2000)
+        # 模拟内部收缴（租客交的，因为有损耗，所以总会少一点）
+        internal_collected = external_cost - random.randint(100, 300) 
+        
+        result.append({
+            "period": m,
+            "external": external_cost,
+            "internal": internal_collected,
+            "loss": external_cost - internal_collected
+        })
+
+    return jsonify({"code": "OK", "data": result})

@@ -1,14 +1,21 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import axios from 'axios'
+import * as echarts from 'echarts'
 
 const rooms = ref<any[]>([])
 const readings = ref<any[]>([])
 const loading = ref(false)
 
-// 加载所有房间用于模拟拍照
+// 图表相关
+const chartRef = ref<HTMLElement | null>(null)
+let myChart: echarts.ECharts | null = null
+
+// 文件上传相关
+const selectedRoom = ref<any>(null)
+
 const fetchRooms = async () => {
-  const res = await axios.get('/api/v1/property/properties') // 先拿楼栋
+  const res = await axios.get('/api/v1/property/properties')
   if (res.data.data.length > 0) {
     const propId = res.data.data[0].property_id
     const roomRes = await axios.get(`/api/v1/property/properties/${propId}/rooms`)
@@ -16,164 +23,195 @@ const fetchRooms = async () => {
   }
 }
 
-// 获取识别记录
 const fetchReadings = async () => {
-  const res = await axios.get('/api/v1/property/readings')
+  const res = await axios.get('/api/v1/metering/readings') // 注意路由变了
   readings.value = res.data.data
 }
 
-// 真实的图片上传识别
-const fileInputRef = ref<HTMLInputElement | null>(null)
-const selectedRoom = ref<any>(null)
+const fetchStatistics = async () => {
+  const res = await axios.get('/api/v1/billing/statistics/water-electric')
+  const data = res.data.data
+  
+  const months = data.map((d: any) => d.period)
+  const external = data.map((d: any) => d.external)
+  const internal = data.map((d: any) => d.internal)
+  const loss = data.map((d: any) => d.loss)
+
+  if (myChart) {
+    myChart.setOption({
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['外部真实成本', '内部收缴', '损耗差额'], bottom: 0 },
+      grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
+      xAxis: { type: 'category', data: months },
+      yAxis: { type: 'value' },
+      series: [
+        { name: '外部真实成本', type: 'bar', data: external, itemStyle: { color: '#909399' } },
+        { name: '内部收缴', type: 'bar', data: internal, itemStyle: { color: '#409EFF' } },
+        { name: '损耗差额', type: 'line', data: loss, itemStyle: { color: '#F56C6C' }, smooth: true }
+      ]
+    })
+  }
+}
 
 // 触发选图
 const triggerUpload = (room: any) => {
-  if (room.room_status === 'VACANT') return alert('空置房间无需抄表')
+  if (room.room_status === 'VACANT') return
   selectedRoom.value = room
-  fileInputRef.value?.click()
+  // 模拟点击 input
 }
 
-// 处理文件上传
-const handleFileUpload = async (event: Event) => {
-  const target = event.target as HTMLInputElement
-  const file = target.files?.[0]
-  if (!file || !selectedRoom.value) return
+// 真实图片上传逻辑（此处用 el-upload 替代，见 template）
+const handleFileUpload = async (options: any) => {
+  const { file } = options
+  if (!selectedRoom.value) return
 
   loading.value = true
   const formData = new FormData()
   formData.append('file', file)
 
   try {
-    await axios.post(`/api/v1/property/rooms/${selectedRoom.value.room_id}/ocr-upload`, formData, {
+    await axios.post(`/api/v1/metering/rooms/${selectedRoom.value.room_id}/ocr-upload`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
-    fetchReadings() // 刷新列表
+    fetchReadings()
   } catch (e: any) {
-    alert(e.response?.data?.message || '图片识别失败')
+    console.error(e)
   } finally {
     loading.value = false
-    // 清空 input，允许重复上传同一张图
-    target.value = ''
   }
 }
 
-// 原有的模拟单拍和连拍可以保留作为“演示模式”，但我们需要把真实上传入口暴露出来
+// 修正异常读数
+const correctReading = async (row: any) => {
+  const { value } = await window.prompt('请输入真实电表读数：', row.value)
+  if (!value) return
+  await axios.post(`/api/v1/metering/readings/${row.reading_id}/correct`, { value: parseFloat(value) })
+  fetchReadings()
+}
 
-// 一键连续拍照
-const batchCapture = async () => {
-  loading.value = true
-  const occupiedRooms = rooms.value.filter(r => r.room_status === 'OCCUPIED')
-  for (const room of occupiedRooms) {
-    await axios.post(`/api/v1/property/rooms/${room.room_id}/ocr-mock`)
-    await new Promise(r => setTimeout(r, 300)) // 模拟连续拍的间隔
+onMounted(async () => {
+  await fetchRooms()
+  await fetchReadings()
+  
+  await nextTick()
+  if (chartRef.value) {
+    myChart = echarts.init(chartRef.value)
+    fetchStatistics()
+    // 监听窗口大小变化，图表自适应
+    window.addEventListener('resize', () => myChart?.resize())
   }
-  loading.value = false
-  fetchReadings()
-}
-
-// 人工修正
-const correctReading = async (reading: any) => {
-  const newValue = prompt(`请输入 ${reading.room_number} 房的真实电表读数：`, reading.value)
-  if (newValue === null) return
-  await axios.post(`/api/v1/property/readings/${reading.reading_id}/correct`, {
-    value: parseFloat(newValue)
-  })
-  fetchReadings()
-}
-
-onMounted(() => {
-  fetchRooms()
-  fetchReadings()
 })
 </script>
 
 <template>
-  <div>
+  <div class="meter-page">
     <div class="page-header">
-      <h1>AI 抄表工作台</h1>
-      <button class="btn-primary" @click="batchCapture" :disabled="loading">
-        {{ loading ? '正在连拍识别中...' : '📷 一键模拟连拍(所有在租房间)' }}
-      </button>
+      <h2>水电与抄表管理</h2>
     </div>
 
-    <div class="layout">
-      <!-- 左侧：模拟相机/房间列表 -->
-      <div class="camera-panel">
-        <h3>选择房间上传电表照片</h3>
-        <!-- 隐藏的文件输入框 -->
-        <input type="file" ref="fileInputRef" @change="handleFileUpload" accept="image/*" style="display: none;" />
-        
-        <div class="room-tags">
-          <button 
-            v-for="r in rooms" 
-            :key="r.room_id" 
-            :disabled="r.room_status === 'VACANT' || loading"
-            @click="triggerUpload(r)"
-            :class="['tag', r.room_status === 'VACANT' ? 'disabled' : '']"
-          >
-            📷 {{ r.room_number }} 拍照
-          </button>
+    <!-- 数据统计 -->
+    <el-card class="chart-card" shadow="hover">
+      <template #header>
+        <div class="card-header">
+          <span>近半年水电收支与损耗趋势</span>
         </div>
-        
-        <div style="margin-top: 30px; border-top: 1px dashed #e5e6eb; padding-top: 20px;">
-          <p style="font-size: 12px; color: #86909c; margin-bottom: 10px;">测试提示：</p>
-          <button class="btn-primary" style="background: #f2f3f5; color: #4e5969; font-size: 13px;" @click="batchCapture">
-            (演示模式) 一键模拟连拍
-          </button>
-        </div>
-      </div>
+      </template>
+      <!-- 修复：必须给固定的高度 -->
+      <div ref="chartRef" style="width: 100%; height: 300px;"></div>
+    </el-card>
 
-      <!-- 右侧：识别流水与异常处理 -->
-      <div class="result-panel">
-        <h3>识别结果与异常拦截</h3>
-        <div v-if="readings.length === 0" class="empty">暂无识别记录</div>
-        <table v-else class="data-table">
-          <thead>
-            <tr><th>时间</th><th>房间</th><th>识别值</th><th>置信度</th><th>状态</th><th>操作</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in readings" :key="r.reading_id" :class="{ 'anomaly-row': r.status === 'ANOMALY' }">
-              <td>{{ r.created_at }}</td>
-              <td><strong>{{ r.room_number }}</strong></td>
-              <td>{{ r.value }}</td>
-              <td>{{ (r.confidence * 100).toFixed(1) }}%</td>
-              <td>
-                <span :class="['badge', r.status === 'SUCCESS' ? 'success' : (r.status === 'ANOMALY' ? 'danger' : 'warning')]">
-                  {{ r.status === 'SUCCESS' ? '正常' : (r.status === 'ANOMALY' ? '读数倒挂' : '人工修正') }}
-                </span>
-              </td>
-              <td>
-                <button v-if="r.status === 'ANOMALY'" class="btn-small danger" @click="correctReading(r)">去修正</button>
-                <span v-else-if="r.status === 'MANUALLY_CORRECTED'" style="color: #86909c; font-size: 12px;">已修正</span>
-                <span v-else style="color: #00b42a; font-size: 12px;">已静默入库</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <el-row :gutter="20" style="margin-top: 20px;">
+      <!-- 左侧：房间列表 -->
+      <el-col :span="6">
+        <el-card shadow="hover">
+          <template #header>
+            <span>选择房间进行拍照</span>
+          </template>
+          <div class="room-list">
+            <div 
+              v-for="r in rooms" 
+              :key="r.room_id"
+              :class="['room-item', r.room_status === 'VACANT' ? 'vacant' : '']"
+              @click="triggerUpload(r)"
+            >
+              <div class="room-info">
+                <span class="room-name">{{ r.room_number }}</span>
+                <span class="room-status">{{ r.room_status === 'OCCUPIED' ? '已租' : '空置' }}</span>
+              </div>
+              <el-upload
+                v-if="r.room_status === 'OCCUPIED'"
+                action="#"
+                :show-file-list="false"
+                :http-request="(opt) => { selectedRoom = r; handleFileUpload(opt) }"
+              >
+                <el-button type="primary" size="small" icon="Camera">拍照</el-button>
+              </el-upload>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+
+      <!-- 右侧：识别记录 -->
+      <el-col :span="18">
+        <el-card shadow="hover">
+          <template #header>
+            <div class="card-header">
+              <span>AI 识别记录</span>
+              <el-button type="success" size="small" :loading="loading">模拟一键连拍</el-button>
+            </div>
+          </template>
+          
+          <el-table :data="readings" style="width: 100%" stripe>
+            <el-table-column prop="created_at" label="时间" width="120" />
+            <el-table-column prop="room_number" label="房间" width="100" />
+            <el-table-column prop="value" label="识别值" width="120" />
+            <el-table-column prop="confidence" label="置信度" width="120">
+              <template #default="scope">{{ (scope.row.confidence * 100).toFixed(1) }}%</template>
+            </el-table-column>
+            <el-table-column label="状态" width="120">
+              <template #default="scope">
+                <el-tag v-if="scope.row.status === 'SUCCESS'" type="success">正常</el-tag>
+                <el-tag v-else-if="scope.row.status === 'ANOMALY'" type="danger">读数倒挂</el-tag>
+                <el-tag v-else type="warning">人工修正</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作">
+              <template #default="scope">
+                <el-button 
+                  v-if="scope.row.status === 'ANOMALY'" 
+                  type="danger" 
+                  size="small" 
+                  @click="correctReading(scope.row)"
+                >
+                  去修正
+                </el-button>
+                <span v-else-if="scope.row.status === 'MANUALLY_CORRECTED'" style="color: #909399;">已修正</span>
+                <span v-else style="color: #67C23A;">已入库</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-col>
+    </el-row>
   </div>
 </template>
 
 <style scoped>
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.btn-primary { background: #1677ff; color: white; border: none; padding: 10px 16px; border-radius: 4px; cursor: pointer; }
-.layout { display: flex; gap: 20px; }
-.camera-panel { width: 300px; background: white; padding: 20px; border-radius: 8px; }
-.result-panel { flex: 1; background: white; padding: 20px; border-radius: 8px; }
-.room-tags { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
-.tag { padding: 8px 16px; border: 1px solid #e5e6eb; border-radius: 4px; background: white; cursor: pointer; }
-.tag:hover:not(.disabled) { border-color: #1677ff; color: #1677ff; }
-.tag.disabled { background: #f2f3f5; color: #c9cdd4; cursor: not-allowed; }
-.data-table { width: 100%; border-collapse: collapse; text-align: left; }
-.data-table th, .data-table td { padding: 12px; border-bottom: 1px solid #e5e6eb; }
-.data-table th { background: #f7f8fa; color: #4e5969; }
-.badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
-.badge.success { background: #e8ffea; color: #00b42a; }
-.badge.danger { background: #ffece8; color: #f53f3f; }
-.badge.warning { background: #fff7e8; color: #ff7d00; }
-.anomaly-row { background: #fffafa; }
-.btn-small { padding: 4px 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
-.btn-small.danger { background: #f53f3f; color: white; }
-.empty { color: #86909c; text-align: center; margin-top: 50px; }
+.meter-page { padding: 20px; }
+.page-header { margin-bottom: 20px; }
+.chart-card { margin-bottom: 20px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; }
+
+.room-list { display: flex; flex-direction: column; gap: 10px; }
+.room-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px; border: 1px solid #ebeef5; border-radius: 4px;
+  transition: all 0.3s;
+}
+.room-item:hover { background-color: #f5f7fa; }
+.room-item.vacant { opacity: 0.6; background-color: #fafafa; }
+
+.room-info { display: flex; flex-direction: column; gap: 4px; }
+.room-name { font-size: 16px; font-weight: bold; }
+.room-status { font-size: 12px; color: #909399; }
 </style>
